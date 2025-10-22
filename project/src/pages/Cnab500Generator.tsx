@@ -13,16 +13,16 @@ import { Download, FileText, Plus } from 'lucide-react';
 
 type Detalhe = {
   id: string;
-  tipoJuros: '2' | '3' | '4' | '5';
+  tipoJuros: '0' | '2' | '3' | '4' | '5';
   taxaJuros: string; // até 3 dígitos (ex: "100" ou "4")
   cobriga: '1' | '2';
   seuNumero: string; // até 25 alfanum
   valorPago: string; // número (aceita decimais), será convertido para 10 posições (centavos)
-  acaoTipo: '01' | '02' | '14';
+  tpMovimento: '01' | '02' | '14';
   numeroDocumento: string; // 10 chars
   dataVencimento: string; // YYYY-MM-DD (input date) -> será convertido para DDMMYY
   valorNominal: string; // número (aceita decimais) -> 13 chars (cents)
-  tipoDocumento: '01' | '60' | '24' | '41';
+  espTitulo: '01' | '60' | '24' | '41';
   dataEmissao: string; // YYYY-MM-DD -> DDMMYY
   tipoPessoaCedente: '01' | '02';
   numeroTermo: string; // 19 chars
@@ -81,6 +81,26 @@ function dateToYYYYMMDD(dateStr: string) {
   return yyyy + mm + dd;
 }
 
+//Converter visualização do CNPJ/CPF
+function formatCpfCnpj(value: string) {
+  const onlyNumbers = value.replace(/\D/g, '');
+
+  if (onlyNumbers.length <= 11) {
+    // Formata CPF: 000.000.000-00
+    return onlyNumbers
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d{1,2})$/, '$1.$2.$3-$4');
+  } else {
+    // Formata CNPJ: 00.000.000/0001-00
+    return onlyNumbers
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3/$4')
+      .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d{1,2})$/, '$1.$2.$3/$4-$5');
+  }
+}
+
 export default function Cnab500Page() {
   // header fields (editáveis em tela)
   const [originadorCodigo, setOriginadorCodigo] = useState(''); // pos 27-46 (20) only numbers
@@ -99,6 +119,9 @@ export default function Cnab500Page() {
 
   const [detalhes, setDetalhes] = useState<Detalhe[]>([]);
 
+  // valor compartilhado do Número do Termo de Cessão
+  const [numeroTermoGlobal, setNumeroTermoGlobal] = useState('');
+
   // file sequence persisted (header pos 111-117 -> 7 chars)
   const FILE_SEQ_KEY = 'cnab_file_seq_v1';
   const [fileSeq, setFileSeq] = useState<number>(() => {
@@ -110,22 +133,27 @@ export default function Cnab500Page() {
     localStorage.setItem(FILE_SEQ_KEY, String(fileSeq));
   }, [fileSeq]);
 
+  // Helper para formatar número para BRL com vírgula
+  function formatBRL(value: number) {
+    return (value / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
   // helper para criar um novo detalhe padrão
   const novoDetalhe = (): Detalhe => ({
     id: String(Date.now()) + Math.random().toString(36).slice(2, 8),
-    tipoJuros: '2',
+    tipoJuros: '0',
     taxaJuros: '',
     cobriga: '2',
     seuNumero: '',
     valorPago: '',
-    acaoTipo: '01',
+    tpMovimento: '01',
     numeroDocumento: '',
     dataVencimento: '',
     valorNominal: '',
-    tipoDocumento: '01',
+    espTitulo: '01',
     dataEmissao: '',
     tipoPessoaCedente: '02',
-    numeroTermo: '',
+    numeroTermo: numeroTermoGlobal,
     valorAquisicao: '',
     tipoPessoaSacado: '02',
     cpfcnpjSacado: '',
@@ -150,8 +178,65 @@ export default function Cnab500Page() {
 
   // gera o arquivo CNAB 500
   const gerarArquivo = () => {
-    // We'll build header (1 line), details (N lines), trailer (1 line)
-    const lines: string[] = [];
+  const lines: string[] = [];
+   // Validação do header
+   if (!originadorCodigo) {
+     alert("Preencha o CNPJ do Originador");
+     return;
+   }
+   if (!originadorNome) {
+     alert("Preencha o Nome do Originador");
+     return;
+   }
+
+   // Validação de detalhes
+  for (let i = 0; i < detalhes.length; i++) {
+    const d = detalhes[i];
+    if (!d.seuNumero) {
+      alert(`Preencha o "Seu Número" do título #${i + 1}`);
+      return;
+    }
+    if (!d.numeroDocumento) {
+      alert(`Preencha o "Número do Documento" do título #${i + 1}`);
+      return;
+    }
+    if (!d.dataVencimento) {
+      alert(`Preencha a "Data de Vencimento" do título #${i + 1}`);
+      return;
+    }
+    if (!d.valorNominal) {
+      alert(`Preencha o "Valor Nominal" do título #${i + 1}`);
+      return;
+    }
+    if (!d.dataEmissao) {
+      alert(`Preencha a "Data de Emissão" do título #${i + 1}`);
+      return;
+    }
+    if (!d.numeroTermo) {
+      alert(`Preencha o "Número do Termo de Cessão" do título #${i + 1}`);
+      return;
+    }
+    if (!d.valorAquisicao) {
+      alert(`Preencha o "Valor de Aquisição" do título #${i + 1}`);
+      return;
+    }
+    if (!d.nomeSacado) {
+      alert(`Preencha o "Nome do Sacado" do título #${i + 1}`);
+      return;
+    }
+    if (!d.cpfcnpjSacado) {
+      alert(`Preencha o "CPF/CNPJ do Sacado" do título #${i + 1}`);
+      return;
+    }
+    if (!d.cnpjCedente) {
+      alert(`Preencha o "CNPJ do Cedente" do título #${i + 1}`);
+      return;
+    }
+    if (!d.nomeCedente) {
+      alert(`Preencha o "Nome do Cedente" do título #${i + 1}`);
+      return;
+    }
+  }
 
     // record sequence starts at 1 for header, increments per line for 6-digit field (495-500)
     let recordSeq = 1;
@@ -165,8 +250,8 @@ export default function Cnab500Page() {
     headerPieces.push(padEnd('08REMESSA01COBRANCA', 26)); // will be 26
 
     // 27-46 originador codigo max 20 numbers
-    const originadorCodigoNums = (originadorCodigo || '').replace(/\D/g, '').slice(0, 20);
-    headerPieces.push(padEnd(originadorCodigoNums, 20));
+    const originadorCodigoNums = (originadorCodigo || '').replace(/\D/g, '').slice(0, 14); // pega só o CNPJ
+    headerPieces.push(padStart(originadorCodigoNums, 20)); // preenche com zeros à esquerda para 20 chars
 
     // 47-76 nome originador 30 chars
     headerPieces.push(padEnd(originadorNome || '', 30));
@@ -232,18 +317,19 @@ export default function Cnab500Page() {
       parts.push(spaces(6));
 
       // 8 tipo de juros (1)
-      parts.push((d.tipoJuros || '2').slice(0, 1));
+      parts.push(d.tipoJuros || '0'); // 1 char: '0' = sem indexador, '2', '3', etc.
 
       // 9-10 em branco (2)
       parts.push(spaces(2));
 
       // 11-20 taxa de juros 10 chars: user inputs up to 3 digits, then pad with trailing zeros to total 10
       const t = (d.taxaJuros || '').replace(/\D/g, '').slice(0, 3).padStart(3, '0');
-      const taxaFormatted = (t + '0000000').slice(0, 10); // ex: '1000000000' or '0040000000'
-      parts.push(taxaFormatted);
+      const taxaFormattedTX = (t + '0000000').slice(0, 10); // ex: '1000000000' or '0040000000'
+      parts.push(taxaFormattedTX);
 
-      // 21-22 cobriga (2)
-      parts.push((d.cobriga || '2').slice(0, 2));
+      // 21-22 cobrigação (2)
+      const cobriga = d.cobriga === '1' ? '01' : '02';
+      parts.push(cobriga); // posições 21-22
 
       // 23-37 preencher zeros (15)
       parts.push(zeros(15));
@@ -270,7 +356,7 @@ export default function Cnab500Page() {
       parts.push(spaces(8));
 
       // 109-110 acao tipo (2)
-      parts.push((d.acaoTipo || '01').slice(0, 2));
+      parts.push((d.tpMovimento || '01').slice(0, 2));
 
       // 111-120 numero documento (10)
       parts.push(padEnd((d.numeroDocumento || '').slice(0, 10), 10));
@@ -285,7 +371,7 @@ export default function Cnab500Page() {
       parts.push(zeros(8));
 
       // 148-149 tipo documento (2)
-      parts.push((d.tipoDocumento || '01').slice(0, 2));
+      parts.push((d.espTitulo || '01').slice(0, 2));
 
       // 150 em branco (1)
       parts.push(' ');
@@ -370,9 +456,8 @@ export default function Cnab500Page() {
     // 2-494 em branco (493)
     trailerParts.push(spaces(493));
 
-    // 495-500 sequencial final = recordSeq - 1 (since recordSeq currently points to next)
-    const lastSeq = recordSeq - 1;
-    trailerParts.push(padStart(String(lastSeq), 6));
+    // 495-500 sequencial final 
+    trailerParts.push(padStart(String(recordSeq), 6));
 
     let trailerLine = trailerParts.join('');
     if (trailerLine.length !== 500) {
@@ -410,22 +495,28 @@ export default function Cnab500Page() {
         {/* Header editable campos (apenas os necessários) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Código do Originador (números)</label>
-            <input
-              value={originadorCodigo}
-              onChange={e => setOriginadorCodigo(e.target.value.replace(/\D/g, '').slice(0, 20))}
-              placeholder="Somente números, até 20"
-              className="w-full px-3 py-2 border rounded"
-            />
-            <p className="text-xs text-slate-500 mt-1">{originadorCodigo.length}/20</p>
+           <label className="block text-sm font-medium text-slate-700 mb-1">CNPJ do Originador</label>
+           <input
+             value={originadorCodigo}
+             onChange={e => {
+               // mantém apenas números
+               const onlyNumbers = e.target.value.replace(/\D/g, '').slice(0, 14); // CNPJ máximo 14 dígitos
+               setOriginadorCodigo(onlyNumbers);
+             }}
+             placeholder="CNPJ"
+             className="w-full px-3 py-2 border rounded"
+           />
+           <p className="text-xs text-slate-500 mt-1">{originadorCodigo.length}/14</p>
           </div>
+
 
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Originador</label>
-            <input
-              value={originadorNome}
-              onChange={e => setOriginadorNome(e.target.value.slice(0, 30))}
-              placeholder="Até 30 caracteres"
+            <input value={originadorNome} onChange={e => {
+                const filtered = e.target.value.replace(/[^a-zA-Z0-9\s]/g, '').slice(0, 30); 
+                setOriginadorNome(filtered.toUpperCase());
+              }}
+              placeholder="Razão Social"
               className="w-full px-3 py-2 border rounded"
             />
             <p className="text-xs text-slate-500 mt-1">{originadorNome.length}/30</p>
@@ -442,7 +533,7 @@ export default function Cnab500Page() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Número do Banco</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Código do Banco</label>
             <input
               value={bancoNumero}
               onChange={e => setBancoNumero(e.target.value.replace(/\D/g, '').slice(0, 3))}
@@ -456,18 +547,18 @@ export default function Cnab500Page() {
             <input
               value={agencia}
               onChange={e => setAgencia(e.target.value.replace(/\D/g, '').slice(0, 5))}
-              placeholder="Ex: 01234"
+              placeholder="Ex: 0001"
               className="w-full px-3 py-2 border rounded"
             />
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-slate-700 mb-1">Conta</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Conta Corrente</label>
             <div className="flex gap-2">
               <input
                 value={conta}
                 onChange={e => setConta(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                placeholder="Número da conta (até 12)"
+                placeholder="Nº da conta do Cedente"
                 className="w-full px-3 py-2 border rounded"
               />
               <input
@@ -519,48 +610,65 @@ export default function Cnab500Page() {
                       onChange={e => updateDetalhe(d.id, { tipoJuros: e.target.value as any })}
                       className="w-full px-2 py-2 border rounded"
                     >
-                      <option value="2">2 - CDI</option>
-                      <option value="3">3 - IPCA-15</option>
-                      <option value="4">4 - IPCA</option>
-                      <option value="5">5 - IGPM</option>
+                      <option value="0">Sem Indexador</option>
+                      <option value="2">CDI</option>
+                      <option value="3">IPCA-15</option>
+                      <option value="4">IPCA</option>
+                      <option value="5">IGPM</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Taxa Juros (%) - até 3 dígitos</label>
+                    <label className="block text-xs text-slate-600">Taxa Juros (%)</label>
                     <input
                       value={d.taxaJuros}
-                      onChange={e => updateDetalhe(d.id, { taxaJuros: e.target.value.replace(/\D/g, '').slice(0, 3) })}
+                      onChange={e => {
+                        let val = e.target.value.replace(/\D/g, '').slice(0, 3); // mantém só números e 3 dígitos
+                        if (Number(val) > 100) val = '100'; // limita a 100
+                        updateDetalhe(d.id, { taxaJuros: val });
+                      }}
                       className="w-full px-2 py-2 border rounded font-mono"
-                      placeholder="ex: 100 ou 4"
-                    />
+                      placeholder="ex: 100, 50, 5" />
+                    <p className="text-xs text-slate-400">Apenas se usar indexador.</p>
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Cobrigação</label>
                     <select value={d.cobriga} onChange={e => updateDetalhe(d.id, { cobriga: e.target.value as any })} className="w-full px-2 py-2 border rounded">
-                      <option value="1">1 - com cobrigação</option>
-                      <option value="2">2 - sem cobrigação</option>
+                      <option value="1">Com Cobrigação</option>
+                      <option value="2">Sem Cobrigação</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Seu Número (ID título)</label>
-                    <input value={d.seuNumero} onChange={e => updateDetalhe(d.id, { seuNumero: e.target.value.slice(0, 25) })} className="w-full px-2 py-2 border rounded" placeholder="até 25 chars" />
+                    <input value={d.seuNumero} onChange={e => updateDetalhe(d.id, { seuNumero: e.target.value.slice(0, 25) })} className="w-full px-2 py-2 border rounded" />
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Valor Pago</label>
-                    <input value={d.valorPago} onChange={e => updateDetalhe(d.id, { valorPago: e.target.value })} placeholder="ex: 1234.56" className="w-full px-2 py-2 border rounded" />
-                    <p className="text-xs text-slate-400">Será convertido para centavos (10 dígitos)</p>
+                    <input
+                      value={d.valorPago ? formatBRL(Number(d.valorPago)) : ''}
+                      onChange={e => {
+                        // remove tudo que não é número
+                        const onlyNumbers = e.target.value.replace(/\D/g, '');
+                        // pega até o limite de 10 dígitos
+                        const limited = onlyNumbers.slice(0, 10);
+                        // salva no detalhe em centavos
+                        updateDetalhe(d.id, { valorPago: limited });
+                      }}
+                      placeholder="ex: 1.234,56"
+                      className="w-full px-2 py-2 border rounded"
+                    />
+                    <p className="text-xs text-slate-400">Usar apenas em movimentos de baixa.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Ação Tipo</label>
-                    <select value={d.acaoTipo} onChange={e => updateDetalhe(d.id, { acaoTipo: e.target.value as any })} className="w-full px-2 py-2 border rounded">
-                      <option value="01">01 - aquisição</option>
-                      <option value="02">02 - baixa</option>
-                      <option value="14">14 - liquidação parcial</option>
+                    <label className="block text-xs text-slate-600">Tipo Movimento</label>
+                    <select value={d.tpMovimento} onChange={e => updateDetalhe(d.id, { tpMovimento: e.target.value as any })} className="w-full px-2 py-2 border rounded">
+                      <option value="01">Aquisição</option>
+                      <option value="02">Baixa</option>
+                      <option value="14">Liquidação parcial</option>
                     </select>
                   </div>
 
@@ -576,17 +684,29 @@ export default function Cnab500Page() {
 
                   <div>
                     <label className="block text-xs text-slate-600">Valor Nominal</label>
-                    <input value={d.valorNominal} onChange={e => updateDetalhe(d.id, { valorNominal: e.target.value })} placeholder="ex: 1234.56" className="w-full px-2 py-2 border rounded" />
-                    <p className="text-xs text-slate-400">Será convertido para centavos (13 dígitos)</p>
+                    <input
+                      value={d.valorNominal ? formatBRL(Number(d.valorNominal)) : ''}
+                      onChange={e => {
+                        // remove tudo que não é número
+                        const onlyNumbers = e.target.value.replace(/\D/g, '');
+                        // pega até o limite de 10 dígitos
+                        const limited = onlyNumbers.slice(0, 10);
+                        // salva no detalhe em centavos
+                        updateDetalhe(d.id, { valorNominal: limited });
+                      }}
+                      placeholder="ex: 1.234,56"
+                      className="w-full px-2 py-2 border rounded"
+                    />
+                    <p className="text-xs text-slate-400">Inserir apenas números.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Tipo Documento</label>
-                    <select value={d.tipoDocumento} onChange={e => updateDetalhe(d.id, { tipoDocumento: e.target.value as any })} className="w-full px-2 py-2 border rounded">
-                      <option value="01">01 - duplicata</option>
-                      <option value="60">60 - contrato</option>
-                      <option value="24">24 - nota comercial</option>
-                      <option value="41">41 - ccb digital</option>
+                    <label className="block text-xs text-slate-600">Espécie de Título</label>
+                    <select value={d.espTitulo} onChange={e => updateDetalhe(d.id, { espTitulo: e.target.value as any })} className="w-full px-2 py-2 border rounded">
+                      <option value="01">Duplicata</option>
+                      <option value="60">Contrato</option>
+                      <option value="24">Nota comercial</option>
+                      <option value="41">CCB digital</option>
                     </select>
                   </div>
 
@@ -596,61 +716,113 @@ export default function Cnab500Page() {
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Termo de Cessão (até 19)</label>
-                    <input value={d.numeroTermo} onChange={e => updateDetalhe(d.id, { numeroTermo: e.target.value.slice(0, 19) })} className="w-full px-2 py-2 border rounded" />
+                    <label className="block text-xs text-slate-600">Número do Termo de Cessão</label>
+                    <input
+                      value={numeroTermoGlobal}
+                      onChange={e => {
+                        const val = e.target.value.slice(0, 19); // limita a 19 chars
+                        setNumeroTermoGlobal(val);
+                        // atualiza todos os detalhes com esse valor
+                        setDetalhes(prev => prev.map(t => ({ ...t, numeroTermo: val })));
+                      }}
+                      className="w-full px-2 py-2 border rounded"
+                    />
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Valor Aquisição</label>
-                    <input value={d.valorAquisicao} onChange={e => updateDetalhe(d.id, { valorAquisicao: e.target.value })} placeholder="ex: 1234.56" className="w-full px-2 py-2 border rounded" />
+                    <input
+                      value={d.valorAquisicao ? formatBRL(Number(d.valorAquisicao)) : ''}
+                      onChange={e => {
+                        // remove tudo que não é número
+                        const onlyNumbers = e.target.value.replace(/\D/g, '');
+                        // pega até o limite de 10 dígitos
+                        const limited = onlyNumbers.slice(0, 10);
+                        // salva no detalhe em centavos
+                        updateDetalhe(d.id, { valorAquisicao: limited });
+                      }}
+                      placeholder="ex: 1.234,56"
+                      className="w-full px-2 py-2 border rounded"
+                    />
+                    <p className="text-xs text-slate-400">Inserir apenas números.</p>
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Tipo Pessoa Sacado</label>
                     <select value={d.tipoPessoaSacado} onChange={e => updateDetalhe(d.id, { tipoPessoaSacado: e.target.value as any })} className="w-full px-2 py-2 border rounded">
-                      <option value="01">01 - PF</option>
-                      <option value="02">02 - PJ</option>
+                      <option value="01">Sacado PF</option>
+                      <option value="02">Sacado PJ</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">CPF/CNPJ Sacado</label>
-                    <input value={d.cpfcnpjSacado} onChange={e => updateDetalhe(d.id, { cpfcnpjSacado: e.target.value.replace(/\D/g, '').slice(0, 14) })} className="w-full px-2 py-2 border rounded" />
+                    <input value={formatCpfCnpj(d.cpfcnpjSacado)} onChange={e => {
+                      // apenas salva números puros no state
+                      const onlyNumbers = e.target.value.replace(/\D/g, '').slice(0, 14);
+                      updateDetalhe(d.id, { cpfcnpjSacado: onlyNumbers });
+                    }}
+                    className="w-full px-2 py-2 border rounded"
+                    />
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-xs text-slate-600">Nome Sacado</label>
-                    <input value={d.nomeSacado} onChange={e => updateDetalhe(d.id, { nomeSacado: e.target.value.slice(0, 40) })} className="w-full px-2 py-2 border rounded" />
+                    <input value={d.nomeSacado} onChange={e => {
+                        const onlyLetters = e.target.value.replace(/[^a-zA-Z\s]/g, '').slice(0, 40);
+                        updateDetalhe(d.id, { nomeSacado: onlyLetters.toUpperCase() });
+                      }}
+                      className="w-full px-2 py-2 border rounded"
+                      />
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-xs text-slate-600">Endereço Sacado</label>
-                    <input value={d.enderecoSacado} onChange={e => updateDetalhe(d.id, { enderecoSacado: e.target.value.slice(0, 40) })} className="w-full px-2 py-2 border rounded" />
+                    <input value={d.enderecoSacado} onChange={e => {
+                       const filtered = e.target.value.replace(/[^a-zA-Z0-9\s]/g, '').slice(0, 40); // 40 chars máximo
+                       updateDetalhe(d.id, { enderecoSacado: filtered.toUpperCase() });
+                     }}
+                     className="w-full px-2 py-2 border rounded"
+                    />
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Número NF (315-323)</label>
+                    <label className="block text-xs text-slate-600">Número NF</label>
                     <input value={d.numeroNotaFiscal} onChange={e => updateDetalhe(d.id, { numeroNotaFiscal: e.target.value.replace(/\D/g, '').slice(0, 9) })} className="w-full px-2 py-2 border rounded" />
+                    <p className="text-xs text-slate-400">Apenas para Duplicatas.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">Série NF (324-326)</label>
+                    <label className="block text-xs text-slate-600">Série NF</label>
                     <input value={d.serieNotaFiscal} onChange={e => updateDetalhe(d.id, { serieNotaFiscal: e.target.value.slice(0, 3) })} className="w-full px-2 py-2 border rounded" />
+                    <p className="text-xs text-slate-400">Apenas para Duplicatas.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600">CEP Sacado (327-334)</label>
+                    <label className="block text-xs text-slate-600">CEP Sacado</label>
                     <input value={d.cepSacado} onChange={e => updateDetalhe(d.id, { cepSacado: e.target.value.replace(/\D/g, '').slice(0, 8) })} className="w-full px-2 py-2 border rounded" />
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">Nome Cedente</label>
-                    <input value={d.nomeCedente} onChange={e => updateDetalhe(d.id, { nomeCedente: e.target.value.slice(0, 46) })} className="w-full px-2 py-2 border rounded" />
+                    <input value={d.nomeCedente} onChange={e => {
+                        const onlyLetters = e.target.value.replace(/[^a-zA-Z\s]/g, '').slice(0, 46);
+                        updateDetalhe(d.id, { nomeCedente: onlyLetters.toUpperCase() });
+                      }}
+                      className="w-full px-2 py-2 border rounded"
+                    />
                   </div>
 
                   <div>
                     <label className="block text-xs text-slate-600">CNPJ Cedente</label>
-                    <input value={d.cnpjCedente} onChange={e => updateDetalhe(d.id, { cnpjCedente: e.target.value.replace(/\D/g, '').slice(0, 14) })} className="w-full px-2 py-2 border rounded" />
+                    <input value={formatCpfCnpj(d.cnpjCedente)}
+                      onChange={e => {
+                        // salva apenas números puros no state
+                        const onlyNumbers = e.target.value.replace(/\D/g, '').slice(0, 14);
+                        updateDetalhe(d.id, { cnpjCedente: onlyNumbers });
+                      }}
+                      className="w-full px-2 py-2 border rounded"
+                    />
                   </div>
                 </div>
               </div>
@@ -659,7 +831,7 @@ export default function Cnab500Page() {
         </div>
 
         <div className="flex items-center justify-between mt-6">
-          <div className="text-sm text-slate-500">Sequencial do arquivo (uso interno): {String(fileSeq).padStart(7, '0')}</div>
+          <div className="text-sm text-slate-500">Utilize o botão ao lado para gerar o arquivo CNAB.</div>
           <button onClick={gerarArquivo} className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-500">
             <Download className="w-4 h-4" />
             Gerar Arquivo CNAB 500
